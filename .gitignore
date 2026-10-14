@@ -1,0 +1,10 @@
+# 컴파일된 라이브러리, 실행 파일 및 디버그 정보
+/.build/
+*.dSYM/
+
+# Python 테스트가 생성하는 캐시
+__pycache__/
+*.pyc
+
+# macOS 폴더 메타데이터
+.DS_Store
