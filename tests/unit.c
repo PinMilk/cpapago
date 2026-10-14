@@ -51,6 +51,8 @@ int main(void)
     valid("{\"translatedText\":\"ok\",\"arr\":[null,true,false,-2.5e+3,{},[]]}", "translatedText", "ok");
     valid("{\"translatedText\":\"ok\",\"unknown\":\"\\u0000\"}", "translatedText", "ok");
     valid("{\"langCode\":\"zh-CN\"}", "langCode", "zh-CN");
+    valid("{\"\\u0074ranslatedText\":\"escaped key\"}", "translatedText", "escaped key");
+    valid("{\"a\\u0000b\":0,\"translatedText\":\"ok\"}", "translatedText", "ok");
     for (i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i) invalid(bad[i]);
     /* 모든 접두 잘림과 과도한 중첩을 검증합니다. */
     {

@@ -18,12 +18,21 @@ static void usage(void)
 /* 다중 일반 번역도 유효한 JSON 문자열 배열로 출력합니다. */
 static void print_json_string(const char *text)
 {
+    static const char hex[] = "0123456789abcdef";
     const unsigned char *c = (const unsigned char *)text;
     putchar('"');
-    for (; *c; ++c) {
+    while (*c) {
+        const unsigned char *start = c;
+        /* 보통의 UTF-8 텍스트는 한 덩어리로 출력해 바이트마다 stdio를 호출하지 않습니다. */
+        while (*c >= 0x20 && *c != '"' && *c != '\\') ++c;
+        if (c != start) fwrite(start, 1, (size_t)(c - start), stdout);
+        if (!*c) break;
         if (*c == '"' || *c == '\\') { putchar('\\'); putchar(*c); }
-        else if (*c < 0x20) printf("\\u%04x", (unsigned)*c);
-        else putchar(*c);
+        else {
+            char escape[] = {'\\', 'u', '0', '0', hex[*c >> 4], hex[*c & 15]};
+            fwrite(escape, 1, sizeof(escape), stdout);
+        }
+        ++c;
     }
     putchar('"');
 }

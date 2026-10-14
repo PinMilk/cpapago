@@ -1,10 +1,57 @@
-# 컴파일된 라이브러리, 실행 파일 및 디버그 정보
+# Makefile의 기본·sanitizer 빌드 결과와 벤치마크 비교용 파일
 /.build/
-*.dSYM/
 
-# Python 테스트가 생성하는 캐시
+# 별도 출력 경로로 사용할 수 있는 빌드 디렉터리
+/build/
+
+# C 컴파일 중 생성되는 오브젝트와 정적 라이브러리 (Unix 계열 / Windows)
+*.o
+*.obj
+*.a
+*.lib
+
+# 공유 라이브러리 (Linux의 버전 번호 포함 / macOS / Windows)
+*.so
+*.so.*
+*.dylib
+*.dll
+
+# 확장자가 있는 실행 파일과 루트에 직접 빌드한 프로그램
+*.exe
+*.out
+/cpapago
+/basic
+/myapp
+
+# macOS 디버그 심볼 번들과 Windows 디버그·증분 링크 정보
+*.dSYM/
+*.pdb
+*.ilk
+
+# Python 테스트 실행으로 생성되는 바이트코드와 도구 캐시
 __pycache__/
 *.pyc
+*.pyo
+.pytest_cache/
 
-# macOS 폴더 메타데이터
+# 테스트·벤치마크의 임시 작업 디렉터리 (테스트 소스와 입력 데이터는 추적)
+/tests/.tmp/
+/tests/.cache/
+/.benchmarks/
+
+# C와 Python의 커버리지·프로파일링 결과
+/coverage/
+.coverage
+.coverage.*
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
+
+# 빌드·테스트·sanitizer 실행 로그
+*.log
+
+# macOS Finder와 Windows 탐색기가 자동 생성하는 메타데이터
 .DS_Store
+Thumbs.db

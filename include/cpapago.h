@@ -58,6 +58,7 @@ cpapago_status cpapago_translate(const cpapago_parameter *parameter,
 /**
  * 입력 순서대로 결과를 반환하는 병렬 다중 번역입니다.
  * 하나라도 실패하면 부분 결과를 해제하고 첫 실패 항목의 오류를 반환합니다.
+ * 각 작업자는 자기 HTTP 핸들을 재사용합니다. 핸들을 스레드 사이에 공유하지 않습니다.
  * count==0은 성공하며 *outputs==NULL입니다. 성공한 결과는 free_many로 해제합니다.
  * parameter/options 문자열은 호출이 끝날 때까지 수정하거나 해제하면 안 됩니다.
  */

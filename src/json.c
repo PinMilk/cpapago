@@ -37,22 +37,28 @@ static int hex4(parser *p, uint32_t *value)
     return 1;
 }
 
-/* 출력이 NULL이면 검증만 합니다. 필요할 때만 문자열 버퍼를 할당합니다. */
-static int string(parser *p, char **output, size_t *length)
+/* 버퍼가 NULL이면 검증/길이 계산만 합니다. 할당과 파싱을 분리해 키 읽기를 무할당으로 처리합니다. */
+static int scan_string(parser *p, char *buffer, size_t *length)
 {
-    char *buffer = NULL;
     size_t used = 0;
     if (p->cursor == p->end || *p->cursor++ != '"') return 0;
-    if (output) {
-        buffer = malloc((size_t)(p->end - p->cursor) + 1);
-        if (!buffer) { p->memory_error = 1; return 0; }
-    }
     while (p->cursor < p->end) {
+        const unsigned char *plain = p->cursor;
+        /* 일반 ASCII 구간은 escape/UTF-8 분기 없이 묶어서 처리합니다. 끝 경계는 항상 검사합니다. */
+        while (p->cursor < p->end && *p->cursor >= 0x20 && *p->cursor < 0x80 &&
+               *p->cursor != '"' && *p->cursor != '\\') ++p->cursor;
+        if (p->cursor != plain) {
+            size_t bytes = (size_t)(p->cursor - plain);
+            if (buffer) memcpy(buffer + used, plain, bytes);
+            used += bytes;
+            if (p->cursor == p->end) break;
+        }
+        plain = p->cursor;
         uint32_t code = *p->cursor++;
         unsigned remaining = 0;
         uint32_t minimum = 0;
         if (code == '"') {
-            if (output) { buffer[used] = '\0'; *output = buffer; }
+            if (buffer) buffer[used] = '\0';
             if (length) *length = used;
             return 1;
         }
@@ -91,6 +97,11 @@ static int string(parser *p, char **output, size_t *length)
                 code = (code << 6) | (*p->cursor++ & 0x3F);
             }
             if (code < minimum || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) goto invalid;
+            /* 이미 검증한 원래 UTF-8은 다시 인코딩할 필요가 없습니다. */
+            size_t bytes = (size_t)(p->cursor - plain);
+            if (buffer) memcpy(buffer + used, plain, bytes);
+            used += bytes;
+            continue;
         }
         /* escape로 얻은 유니코드도 UTF-8로 변환합니다. 원래 JSON 길이를 넘지 않습니다. */
         if (code < 0x80) { if (buffer) buffer[used] = (char)code; ++used; }
@@ -105,8 +116,31 @@ static int string(parser *p, char **output, size_t *length)
         }
     }
 invalid:
-    free(buffer);
     return 0;
+}
+
+/* 결과 길이만큼만 할당합니다. JSON 뒤의 큰 사전 객체 때문에 과도하게 할당하지 않습니다.
+ * escape가 없으면 이미 검증한 원문을 그대로 복사하고, escape가 있을 때만 복호화합니다. */
+static int string(parser *p, char **output, size_t *length)
+{
+    parser probe;
+    const unsigned char *start;
+    size_t decoded_length;
+    char *buffer;
+    if (!output) return scan_string(p, NULL, length);
+    probe = *p;
+    start = p->cursor;
+    if (!scan_string(&probe, NULL, &decoded_length)) { *p = probe; return 0; }
+    buffer = malloc(decoded_length + 1);
+    if (!buffer) { p->memory_error = 1; return 0; }
+    if ((size_t)(probe.cursor - start) - 2 == decoded_length) {
+        memcpy(buffer, start + 1, decoded_length);
+        buffer[decoded_length] = '\0';
+        *p = probe;
+    } else if (!scan_string(p, buffer, NULL)) { free(buffer); return 0; }
+    if (length) *length = decoded_length;
+    *output = buffer;
+    return 1;
 }
 
 static int value(parser *p);
@@ -182,18 +216,28 @@ int cpapago_json_string(const char *document, size_t length, const char *field, 
     parser p = {(const unsigned char *)document, (const unsigned char *)document + length, 1, 0};
     char *found = NULL;
     size_t found_length = 0;
+    const size_t field_length = strlen(field);
     *output = NULL;
     whitespace(&p);
     if (p.cursor == p.end || *p.cursor++ != '{') return 0;
     whitespace(&p);
     if (p.cursor < p.end && *p.cursor == '}') return 0;
     for (;;) {
-        char *key = NULL;
+        const unsigned char *start = p.cursor;
         size_t key_length;
         int match;
-        if (!string(&p, &key, &key_length)) goto invalid;
-        match = key_length == strlen(field) && memcmp(key, field, key_length) == 0;
-        free(key);
+        if (!string(&p, NULL, &key_length)) goto invalid;
+        if ((size_t)(p.cursor - start) - 2 == key_length) {
+            /* 보통의 JSON 키는 escape가 없어 원본 슬라이스를 직접 비교할 수 있습니다. */
+            match = key_length == field_length && memcmp(start + 1, field, key_length) == 0;
+        } else {
+            char *key = NULL;
+            parser key_parser = p;
+            key_parser.cursor = start;
+            if (!string(&key_parser, &key, NULL)) { p.memory_error = key_parser.memory_error; goto invalid; }
+            match = key_length == field_length && memcmp(key, field, key_length) == 0;
+            free(key);
+        }
         whitespace(&p);
         if (p.cursor == p.end || *p.cursor++ != ':') goto invalid;
         whitespace(&p);

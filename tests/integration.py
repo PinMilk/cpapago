@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import socket
 import threading
 import time
 from urllib.parse import parse_qs
@@ -13,9 +14,17 @@ CLI = Path(os.environ.get("CPAPAGO_CLI", str(ROOT / ".build/cpapago"))).resolve(
 REQUESTS = []
 LOCK = threading.Lock()
 STATE = {"active": 0, "maximum": 0}
+CONNECTIONS = set()
 
 
 class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def setup(self):
+        super().setup()
+        # 작은 응답의 Nagle 지연이 연결 재사용 테스트에 영향을 주지 않도록 합니다.
+        self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
     def log_message(self, *args):
         pass
 
@@ -25,6 +34,7 @@ class Handler(BaseHTTPRequestHandler):
         assert "Authorization" not in self.headers
         with LOCK:
             REQUESTS.append((self.path, form))
+            CONNECTIONS.add(self.client_address)
         if self.path == "/api/langs/dect":
             text = form["query"][0]
             response = {"langCode": "zh-CN" if "你好" in text else "en"}
@@ -87,14 +97,22 @@ def main():
         text = 'Hello & text=wrong + 100% #테스트\n안녕하세요 😀 "quote" \\ slash'
         assert run("detect", text).stdout.strip() == "en"
         assert run("detect", "你好").stdout.strip() == "zh-cn"
+        before_connections = set(CONNECTIONS)
         assert run("translate", "ko", text).stdout.rstrip("\n") == text
+        assert len(CONNECTIONS - before_connections) == 1, "Detection and translation must reuse a connection"
         assert run("translate", "ko", "", "--source", "en").stdout == "\n"
+        ascii_text = ''.join(chr(value) for value in range(1, 128))
+        # 폼 바이트 인코딩과 CLI JSON escape가 모든 비널 ASCII를 보존하는지 검사합니다.
+        ascii_batch = json.loads(run("batch", "ko", ascii_text, "--source", "en").stdout)
+        assert ascii_batch == [ascii_text]
         verbose = json.loads(run("translate", "ko", "你好", "--verbose", "--honorific").stdout)
         assert verbose["srcLangType"] == "zh-CN" and verbose["translatedText"] == "你好"
         translated = json.loads(run("translate", "zh-tw", text, "--source", "zh-cn", "--verbose").stdout)
         assert translated["srcLangType"] == "zh-CN" and translated["tarLangType"] == "zh-TW"
         batch = [f"batch-{index}" for index in range(8)]
+        before_connections = set(CONNECTIONS)
         assert json.loads(run("batch", "ko", *batch, "--source", "en", "--parallel", "4").stdout) == batch
+        assert len(CONNECTIONS - before_connections) <= 4, "Each worker must reuse its connection"
         assert 1 < STATE["maximum"] <= 4, STATE
         verbose_batch = json.loads(run("batch", "ko", "first", "second", "--source", "en", "--verbose").stdout)
         assert [item["translatedText"] for item in verbose_batch] == ["first", "second"]
